@@ -1,3 +1,9 @@
+![Project Banner](assets/banner.png)
+
+
+
+
+
 # Hyperbolic Tokenization Framework
 
 This repository contains a complete implementation of the Hyperbolic Tokenization framework—a novel approach to subword tokenization that leverages hyperbolic geometry to guide the token merging process.
