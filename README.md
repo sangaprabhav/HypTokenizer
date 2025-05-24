@@ -1,4 +1,4 @@
-![Project Banner](assets/Screenshot 2025-05-24 at 20.33.44.png)
+![Project Banner](Screenshot 2025-05-24 at 20.33.44.png)
 
 
 
