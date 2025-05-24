@@ -22,7 +22,8 @@ from tqdm import tqdm
 # Add parent directory to path to import from tokenizer and embedding
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tokenizer.hyperbolic_merge import HyperbolicTokenizer
-from embedding.lorentz_model import exp_map, log_map, distance, project_to_hyperboloid
+from tokenizer.fast_hyperbolic_merge import FastHyperbolicTokenizer
+from embedding.lorentz_model import exp_map, log_map, distance, project_to_hyperboloid, batch_distance
 
 
 logging.basicConfig(
@@ -118,7 +119,14 @@ def train_tokenizer(
     merge_steps: int = 100000,
     log_every: int = 1000,
     target_vocab_size: Optional[int] = None,
-    seed: int = 42
+    seed: int = 42,
+    use_fast_tokenizer: bool = True,
+    hnsw_m: int = 32,
+    hnsw_ef_construction: int = 200,
+    hnsw_ef_search: int = 100,
+    cache_size: int = 10000,
+    rebuild_frequency: int = 100,
+    no_faiss: bool = False
 ) -> Dict[str, Any]:
     """
     Train a hyperbolic tokenizer.
@@ -155,15 +163,36 @@ def train_tokenizer(
     embeddings = initialize_embeddings(vocab, embedding_dim, curvature, device)
     logger.info(f"Initialized embeddings with shape {embeddings.shape}")
     
-    # Create tokenizer
-    tokenizer = HyperbolicTokenizer(
-        vocab=vocab,
-        embeddings=torch.nn.Parameter(embeddings),
-        curvature=curvature,
-        merge_threshold=merge_threshold,
-        lr=learning_rate,
-        device=device
-    )
+    # Initialize tokenizer
+    if use_fast_tokenizer:
+        tokenizer = FastHyperbolicTokenizer(
+            vocab=vocab,
+            embeddings=torch.nn.Parameter(embeddings),
+            curvature=curvature,
+            merge_threshold=merge_threshold,
+            lr=learning_rate,
+            device=device,
+            hnsw_m=hnsw_m,
+            hnsw_ef_construction=hnsw_ef_construction,
+            hnsw_ef_search=hnsw_ef_search,
+            cache_size=cache_size,
+            rebuild_frequency=rebuild_frequency,
+            use_approximate_search=not no_faiss
+        )
+        if no_faiss:
+            logger.info("Using FastHyperbolicTokenizer with batch optimization (FAISS disabled)")
+        else:
+            logger.info("Using FastHyperbolicTokenizer with HNSW for efficient nearest neighbor search")
+    else:
+        tokenizer = HyperbolicTokenizer(
+            vocab=vocab,
+            embeddings=torch.nn.Parameter(embeddings),
+            curvature=curvature,
+            merge_threshold=merge_threshold,
+            lr=learning_rate,
+            device=device
+        )
+        logger.info("Using standard HyperbolicTokenizer")
     logger.info("Created hyperbolic tokenizer")
     
     # Define optimization callback for logging
@@ -199,58 +228,62 @@ def train_tokenizer(
     # Optimize merges
     logger.info(f"Starting merge optimization for {merge_steps} steps")
     
-    # Create a custom optimize_merges method with callback and target vocab size
-    def optimize_with_callback():
-        pbar = tqdm(range(merge_steps), desc="Optimizing merges")
+    if use_fast_tokenizer:
+        # When using FastHyperbolicTokenizer, we can use its built-in optimize_merges method
+        tokenizer.optimize_merges(steps=merge_steps, log_every=log_every)
+    else:
+        # For the standard tokenizer, create a custom optimize_merges method with callback and target vocab size
+        def optimize_with_callback():
+            pbar = tqdm(range(merge_steps), desc="Optimizing merges")
+            
+            for step in pbar:
+                # Log callback
+                log_callback(step, tokenizer)
+                
+                # Check if target vocab size reached
+                if target_vocab_size is not None and len(tokenizer.vocab) >= target_vocab_size:
+                    logger.info(f"Reached target vocabulary size {target_vocab_size}")
+                    break
+                
+                # Find merge candidates
+                candidates = tokenizer._find_merge_candidates()
+                
+                if not candidates:
+                    logger.info(f"No more merge candidates found after {step} steps")
+                    break
+                
+                # Sort candidates by distance (ascending)
+                candidates.sort(key=lambda x: x[2])
+                
+                # Process top-k candidates in batch (faster on GPU)
+                batch_size = min(64, len(candidates))
+                top_candidates = candidates[:batch_size]
+                
+                # Evaluate distances in parallel
+                pairs_i = [c[0] for c in top_candidates]
+                pairs_j = [c[1] for c in top_candidates]
+                
+                # Select the best candidate
+                best_idx = 0  # Default to the first candidate
+                best_dist = top_candidates[0][2]
+                
+                # Perform the merge
+                i, j, dist = top_candidates[best_idx]
+                tokenizer._merge_tokens(i, j)
+                
+                # Update progress bar
+                pbar.set_postfix({
+                    "vocab_size": len(tokenizer.vocab),
+                    "best_dist": dist,
+                    "threshold": tokenizer.merge_threshold
+                })
+                
+                # Adaptive threshold adjustment (optional)
+                if step > 0 and step % 1000 == 0:
+                    tokenizer.merge_threshold *= 1.05  # Gradually increase threshold
         
-        for step in pbar:
-            # Log callback
-            log_callback(step, tokenizer)
-            
-            # Check if target vocab size reached
-            if target_vocab_size is not None and len(tokenizer.vocab) >= target_vocab_size:
-                logger.info(f"Reached target vocabulary size {target_vocab_size}")
-                break
-            
-            # Find merge candidates
-            candidates = tokenizer._find_merge_candidates()
-            
-            if not candidates:
-                logger.info(f"No more merge candidates found after {step} steps")
-                break
-            
-            # Sort candidates by distance (ascending)
-            candidates.sort(key=lambda x: x[2])
-            
-            # Process top-k candidates in batch (faster on GPU)
-            batch_size = min(64, len(candidates))
-            top_candidates = candidates[:batch_size]
-            
-            # Evaluate distances in parallel
-            pairs_i = [c[0] for c in top_candidates]
-            pairs_j = [c[1] for c in top_candidates]
-            
-            # Select the best candidate
-            best_idx = 0  # Default to the first candidate
-            best_dist = top_candidates[0][2]
-            
-            # Perform the merge
-            i, j, dist = top_candidates[best_idx]
-            tokenizer._merge_tokens(i, j)
-            
-            # Update progress bar
-            pbar.set_postfix({
-                "vocab_size": len(tokenizer.vocab),
-                "best_dist": dist,
-                "threshold": tokenizer.merge_threshold
-            })
-            
-            # Adaptive threshold adjustment (optional)
-            if step > 0 and step % 1000 == 0:
-                tokenizer.merge_threshold *= 1.05  # Gradually increase threshold
-    
-    # Run optimization
-    optimize_with_callback()
+        # Run optimization
+        optimize_with_callback()
     
     # Save tokenizer
     os.makedirs(output_dir, exist_ok=True)
@@ -267,14 +300,21 @@ def train_tokenizer(
 def main(
     vocab_path: str = "data/processed/wiki/vocab_initial.txt",
     output_dir: str = "results/hyperbolic/v50000",
-    embedding_dim: int = 50,
+    embedding_dim: int = 5,
     curvature: float = 1.0,
     merge_threshold: float = 0.1,
     learning_rate: float = 1e-3,
-    merge_steps: int = 100000,
-    log_every: int = 1000,
-    target_vocab_size: Optional[int] = 50000,
-    seed: int = 42
+    merge_steps: int = 100,
+    log_every: int = 10,
+    target_vocab_size: Optional[int] = 500,
+    seed: int = 42,
+    use_fast_tokenizer: bool = True,
+    hnsw_m: int = 32,
+    hnsw_ef_construction: int = 200,
+    hnsw_ef_search: int = 100,
+    cache_size: int = 10000,
+    rebuild_frequency: int = 100,
+    no_faiss: bool = False
 ) -> None:
     """
     Train a hyperbolic tokenizer with the given parameters.
@@ -289,7 +329,14 @@ def main(
         merge_steps=merge_steps,
         log_every=log_every,
         target_vocab_size=target_vocab_size,
-        seed=seed
+        seed=seed,
+        use_fast_tokenizer=use_fast_tokenizer,
+        hnsw_m=hnsw_m,
+        hnsw_ef_construction=hnsw_ef_construction,
+        hnsw_ef_search=hnsw_ef_search,
+        cache_size=cache_size,
+        rebuild_frequency=rebuild_frequency,
+        no_faiss=no_faiss
     )
 
 

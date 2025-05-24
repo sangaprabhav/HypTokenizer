@@ -178,6 +178,38 @@ def batch_distance(x: torch.Tensor, y: torch.Tensor, c: float = 1.0) -> torch.Te
     return torch.acosh(xy_dot) / torch.sqrt(c_tensor)
 
 
+def batch_distance_optimized(x: torch.Tensor, y: torch.Tensor, c: float = 1.0) -> torch.Tensor:
+    """
+    Optimized batch distance computation using Einstein summation and in-place operations.
+    
+    Args:
+        x: Tensor of shape (batch_size_1, d+1)
+        y: Tensor of shape (batch_size_2, d+1)
+        c: Curvature parameter
+        
+    Returns:
+        Tensor of shape (batch_size_1, batch_size_2) with pairwise distances
+    """
+    # Use Einstein summation for efficiency
+    time_comp = torch.einsum('ik,jk->ij', x[..., :1], y[..., :1])
+    space_comp = torch.einsum('ik,jk->ij', x[..., 1:], y[..., 1:])
+    
+    # Compute Minkowski dot product
+    mink_dot = time_comp - space_comp
+    
+    # Negative for distance calculation
+    xy_dot = -mink_dot
+    
+    # Clamp and compute in one operation
+    xy_dot_clamped = torch.clamp(xy_dot, min=1.0 + 1e-8)
+    
+    # Use precomputed square root of curvature for efficiency
+    c_sqrt = c ** 0.5
+    
+    # Return distances
+    return torch.acosh(xy_dot_clamped) / c_sqrt
+
+
 def parallel_transport(v: torch.Tensor, x: torch.Tensor, y: torch.Tensor, c: float = 1.0) -> torch.Tensor:
     """
     Parallel transport a vector v from point x to point y on the hyperboloid.
