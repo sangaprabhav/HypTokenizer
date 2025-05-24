@@ -1,3 +1,5 @@
+![Project Banner](ss.png)
+
 # Hyperbolic Tokenization Framework
 
 This repository contains a complete implementation of the Hyperbolic Tokenization framework—a novel approach to subword tokenization that leverages hyperbolic geometry to guide the token merging process. The implementation includes both the standard algorithm and an optimized version with Hierarchical Navigable Small World (HNSW) indexing for efficient nearest neighbor search in large vocabularies.
