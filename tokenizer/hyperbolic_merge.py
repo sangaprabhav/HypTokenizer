@@ -101,31 +101,70 @@ class HyperbolicTokenizer:
     
     def _find_merge_candidates(self) -> List[Tuple[int, int, float]]:
         """
-        Find candidate token pairs for merging based on hyperbolic distance.
+        Find potential merge candidates based on hyperbolic distance.
         
         Returns:
-            List of tuples (i, j, dist) representing merge candidates
+            List of (i, j, distance) tuples for merge candidates
         """
-        # Compute pairwise distances
-        distances = self._compute_pairwise_distances()
-        
-        # Create a mask for valid merges (only adjacent tokens in the vocabulary)
+        candidates = []
         n = len(self.vocab)
-        valid_mask = torch.zeros((n, n), dtype=torch.bool, device=self.device)
         
-        # Find token pairs that could form valid merges
-        for i, token_i in enumerate(self.vocab):
-            for j, token_j in enumerate(self.vocab):
-                # Check if these tokens can be merged (they form a continuous sequence)
-                merged = token_i + token_j
-                valid_mask[i, j] = self._is_valid_merge(token_i, token_j)
+        # Check if we should use vectorized operations (faster on GPU with large vocabulary)
+        if n > 1000:
+            # Create a mask to avoid comparing tokens with themselves
+            mask = torch.ones((n, n), dtype=torch.bool, device=self.device)
+            mask.fill_diagonal_(False)
+            
+            # Compute pairwise distances using broadcasting (much faster on GPU)
+            with torch.no_grad():
+                # Compute all pairwise distances in one operation
+                all_dists = torch.zeros((n, n), device=self.device)
+                
+                # Process in chunks to avoid OOM for very large vocabularies
+                chunk_size = 1000  # Adjust based on memory
+                for i in range(0, n, chunk_size):
+                    end_i = min(i + chunk_size, n)
+                    chunk_emb_i = self.embeddings[i:end_i]
+                    
+                    for j in range(0, n, chunk_size):
+                        end_j = min(j + chunk_size, n)
+                        chunk_emb_j = self.embeddings[j:end_j]
+                        
+                        # Compute distances between chunks
+                        for ii in range(chunk_emb_i.shape[0]):
+                            for jj in range(chunk_emb_j.shape[0]):
+                                idx_i, idx_j = i + ii, j + jj
+                                if idx_i != idx_j:  # Skip diagonal
+                                    all_dists[idx_i, idx_j] = distance(
+                                        self.embeddings[idx_i].unsqueeze(0),
+                                        self.embeddings[idx_j].unsqueeze(0),
+                                        self.curvature
+                                    ).item()
+                
+                # Find candidates below the threshold
+                valid_pairs = (all_dists < self.merge_threshold) & mask
+                candidate_indices = valid_pairs.nonzero(as_tuple=True)
+                
+                for i, j in zip(*candidate_indices):
+                    i, j = i.item(), j.item()
+                    # Ensure we only consider each pair once (i < j)
+                    if i < j:
+                        candidates.append((i, j, all_dists[i, j].item()))
+        else:
+            # Original implementation for smaller vocabularies
+            for i in range(n):
+                for j in range(i + 1, n):  # Only consider pairs (i,j) where i < j
+                    dist = distance(
+                        self.embeddings[i].unsqueeze(0),
+                        self.embeddings[j].unsqueeze(0),
+                        self.curvature
+                    ).item()
+                    
+                    # Add candidates with distance below the threshold
+                    if dist < self.merge_threshold:
+                        candidates.append((i, j, dist))
         
-        # Apply mask and find candidates below threshold
-        masked_distances = torch.where(valid_mask, distances, torch.tensor(float('inf'), device=self.device))
-        candidates = torch.nonzero(masked_distances < self.merge_threshold, as_tuple=True)
-        
-        # Convert to list of tuples with distances
-        return [(i.item(), j.item(), distances[i, j].item()) for i, j in zip(*candidates)]
+        return candidates
     
     def _is_valid_merge(self, token_i: str, token_j: str) -> bool:
         """

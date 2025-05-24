@@ -138,6 +138,46 @@ def distance(x: torch.Tensor, y: torch.Tensor, c: float = 1.0) -> torch.Tensor:
     return torch.acosh(xy_dot) / torch.sqrt(c_tensor)
 
 
+def batch_distance(x: torch.Tensor, y: torch.Tensor, c: float = 1.0) -> torch.Tensor:
+    """
+    Compute hyperbolic distances between batches of points on the hyperboloid.
+    Much faster than individual distance calculations when computing many pairs.
+    
+    Args:
+        x: Tensor of shape (batch_size_1, d+1)
+        y: Tensor of shape (batch_size_2, d+1)
+        c: Curvature parameter
+        
+    Returns:
+        Tensor of shape (batch_size_1, batch_size_2) with pairwise distances
+    """
+    # Reshape for broadcasting
+    x_reshaped = x.unsqueeze(1)  # Shape: (batch_size_1, 1, d+1)
+    y_reshaped = y.unsqueeze(0)  # Shape: (1, batch_size_2, d+1)
+    
+    # Compute Minkowski dot product for all pairs at once
+    # First component multiplication (time-like)
+    time_comp = x_reshaped[..., 0] * y_reshaped[..., 0]  # Shape: (batch_size_1, batch_size_2)
+    
+    # Space-like components dot product
+    space_comp = torch.sum(x_reshaped[..., 1:] * y_reshaped[..., 1:], dim=-1)  # Shape: (batch_size_1, batch_size_2)
+    
+    # Full Minkowski dot product
+    mink_dot = time_comp - space_comp  # Shape: (batch_size_1, batch_size_2)
+    
+    # Negative for distance calculation
+    xy_dot = -mink_dot
+    
+    # Clamp values for numerical stability
+    xy_dot = torch.clamp(xy_dot, min=1.0 + 1e-8)
+    
+    # Convert curvature to tensor
+    c_tensor = torch.tensor(c, device=x.device, dtype=x.dtype)
+    
+    # Return distances
+    return torch.acosh(xy_dot) / torch.sqrt(c_tensor)
+
+
 def parallel_transport(v: torch.Tensor, x: torch.Tensor, y: torch.Tensor, c: float = 1.0) -> torch.Tensor:
     """
     Parallel transport a vector v from point x to point y on the hyperboloid.

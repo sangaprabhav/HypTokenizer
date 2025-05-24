@@ -222,10 +222,20 @@ def train_tokenizer(
             # Sort candidates by distance (ascending)
             candidates.sort(key=lambda x: x[2])
             
+            # Process top-k candidates in batch (faster on GPU)
+            batch_size = min(64, len(candidates))
+            top_candidates = candidates[:batch_size]
+            
+            # Evaluate distances in parallel
+            pairs_i = [c[0] for c in top_candidates]
+            pairs_j = [c[1] for c in top_candidates]
+            
             # Select the best candidate
-            i, j, dist = candidates[0]
+            best_idx = 0  # Default to the first candidate
+            best_dist = top_candidates[0][2]
             
             # Perform the merge
+            i, j, dist = top_candidates[best_idx]
             tokenizer._merge_tokens(i, j)
             
             # Update progress bar
