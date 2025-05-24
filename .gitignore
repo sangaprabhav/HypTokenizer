@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Jupyter
+.ipynb_checkpoints
+
+# Virtual environments
+venv/
+ENV/
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Large data files
+# Keep the directory structure but ignore large files
+data/raw/*.bz2
+data/raw/*.xml
+data/raw/*.txt
+data/processed/wiki/wiki.txt
+data/processed/wikitext103/train.txt
+data/processed/yahoo/train.txt
+# But keep smaller metadata files
+!data/processed/wiki/vocab_initial.txt

@@ -1,0 +1,17 @@
+torch>=1.13.0
+geoopt>=0.5.0
+datasets>=2.8.0
+transformers>=4.25.1
+torchvision>=0.14.0
+torchaudio>=0.13.0
+nltk>=3.7
+networkx>=2.8.0
+scipy>=1.9.0
+matplotlib>=3.6.0
+umap-learn>=0.5.3
+scikit-learn>=1.2.0
+typer>=0.7.0
+wandb>=0.13.0
+sentencepiece>=0.1.97
+numpy>=1.23.0
+tqdm>=4.64.0

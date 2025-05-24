@@ -1,0 +1,11 @@
+Instructions for downloading MSCOCO 2017 Captions dataset:
+1. Visit https://cocodataset.org/#download
+2. Download 2017 Train/Val annotations [241MB]
+3. Download 2017 Train images [18GB] and 2017 Val images [1GB] if needed
+4. Extract the downloaded files to this directory
+
+Alternatively, you can use the following commands:
+wget http://images.cocodataset.org/annotations/annotations_trainval2017.zip
+unzip annotations_trainval2017.zip
+wget http://images.cocodataset.org/zips/train2017.zip  # Optional, 18GB
+wget http://images.cocodataset.org/zips/val2017.zip  # Optional, 1GB
