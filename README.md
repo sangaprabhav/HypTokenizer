@@ -48,7 +48,12 @@ HypTokenizer/
 │   └── processed/              # Processed datasets
 ├── tokenizer/                  # Tokenization algorithms
 │   ├── hyperbolic_merge.py     # Hyperbolic tokenizer implementation
-│   └── fast_hyperbolic_merge.py # Optimized tokenizer with HNSW
+│   ├── fast_hyperbolic_merge.py # Optimized tokenizer with HNSW
+│   ├── frequency_aware_hyperbolic_merge.py # Frequency-aware tokenizer
+│   ├── hierarchical_hyperbolic_merge.py # Hierarchical merge strategy tokenizer
+│   ├── adaptive_curvature_tokenizer.py # Adaptive curvature optimization tokenizer
+│   ├── compression_aware_tokenizer.py # Compression-aware tokenizer
+│   └── enhanced_fast_hyperbolic_merge.py # Enhanced tokenizer with all features
 ├── embedding/              # Hyperbolic embedding modules
 │   ├── lorentz_model.py    # Lorentz model operations
 │   └── poincare_ball.py    # Poincaré ball operations
@@ -97,6 +102,19 @@ python scripts/train_hyperbolic_tokenizer.py \
     --hnsw_ef_construction 200 \
     --hnsw_ef_search 100 \
     --cache_size 10000
+
+# Train enhanced hyperbolic tokenizer with all advanced features
+python scripts/train_enhanced_hyperbolic_tokenizer.py \
+    --vocab_path data/processed/wiki/vocab_initial.txt \
+    --corpus_path data/processed/wiki/wiki.txt \
+    --output_dir results/hyperbolic/enhanced_tokenizer \
+    --embedding_dim 100 \
+    --target_vocab_size 50000 \
+    --use_frequency_aware \
+    --use_hierarchical \
+    --use_adaptive_curvature \
+    --use_compression_aware \
+    --phase_transition_steps 1000 6000
 
 # For Apple Silicon (MPS) or platforms without FAISS
 python scripts/train_hyperbolic_tokenizer.py \
@@ -149,7 +167,7 @@ The framework implements the Lorentz model of hyperbolic geometry, with operatio
 
 ### Hyperbolic Tokenizer
 
-The framework includes two tokenizer implementations:
+The framework includes several tokenizer implementations:
 
 **Standard HyperbolicTokenizer:**
 - Initialized with character-level tokens and embeddings
@@ -164,6 +182,16 @@ The framework includes two tokenizer implementations:
 - Supports parallel candidate evaluation for faster merges
 - Includes optimizations for different device types (CUDA, MPS, CPU)
 - Automatically falls back to optimized batch method when FAISS is unavailable
+
+**EnhancedFastHyperbolicTokenizer (Advanced):**
+- Integrates multiple advanced tokenization techniques in a unified framework
+- **Frequency-Aware Merging**: Uses corpus statistics to prioritize frequent token pairs
+- **Hierarchical Merge Strategy**: Three-phase approach (character → subword → word-level)
+- **Adaptive Curvature Optimization**: Dynamically adjusts curvature to preserve hierarchy
+- **Compression-Aware Scoring**: Evaluates merge candidates based on compression efficiency
+- Configurable feature flags allow enabling/disabling individual components
+- Provides phase-based training with adaptive thresholds for different linguistic levels
+- Comprehensive diagnostics and statistics tracking during training
 
 ### Multimodal Learning
 

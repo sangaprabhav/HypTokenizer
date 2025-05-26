@@ -5,6 +5,7 @@ scipy>=1.9.0
 
 # Hyperbolic geometry
 geoopt>=0.5.0
+manifold>=1.0.0  # For advanced hyperbolic operations
 
 # Fast nearest neighbor search (optional, for FastHyperbolicTokenizer)
 faiss-cpu>=1.7.0; platform_system!="Darwin" or platform_machine!="arm64"
@@ -14,6 +15,8 @@ datasets>=2.8.0
 transformers>=4.25.1
 nltk>=3.7
 sentencepiece>=0.1.97
+spacy>=3.5.0  # For linguistic features in hierarchical tokenizer
+scikit-learn>=1.2.0  # For compression metrics
 
 # Visualization and evaluation
 torchvision>=0.14.0

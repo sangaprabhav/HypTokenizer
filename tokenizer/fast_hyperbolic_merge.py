@@ -15,6 +15,7 @@ import numpy as np
 import heapq
 import time
 import logging
+import random
 from typing import List, Tuple, Set, Optional, Dict, Any
 from dataclasses import dataclass
 import warnings
@@ -429,8 +430,43 @@ class FastHyperbolicTokenizer(HyperbolicTokenizer):
         
         return scores
     
+    def _compute_distance_statistics(self, sample_size: int = 1000) -> Dict[str, float]:
+        """
+        Compute distance statistics between random token pairs.
+        
+        Args:
+            sample_size: Number of random token pairs to sample
+            
+        Returns:
+            Dictionary with distance statistics
+        """
+        with torch.no_grad():
+            n = self.current_vocab_size
+            actual_sample_size = min(sample_size, n * (n - 1) // 2)
+            sample_dists = []
+            
+            for _ in range(actual_sample_size):
+                i, j = random.sample(range(n), 2)
+                d = distance(
+                    self.embeddings[i].unsqueeze(0),
+                    self.embeddings[j].unsqueeze(0),
+                    self.curvature
+                ).item()
+                sample_dists.append(d)
+            
+            if not sample_dists:  # Safety check
+                return {"min": 0.0, "max": 0.0, "mean": 0.0, "std": 0.0}
+                
+            return {
+                "min": min(sample_dists),
+                "max": max(sample_dists),
+                "mean": np.mean(sample_dists),
+                "std": np.std(sample_dists)
+            }
+    
     def optimize_merges(self, steps: int = 10000, log_every: int = 1000,
-                      text_sample: Optional[List[str]] = None) -> None:
+                      text_sample: Optional[List[str]] = None,
+                      adaptive_threshold: bool = True) -> None:
         """
         Optimized merge process with batching.
         
@@ -438,10 +474,35 @@ class FastHyperbolicTokenizer(HyperbolicTokenizer):
             steps: Maximum number of merge steps to perform
             log_every: How often to log progress
             text_sample: Optional sample of text for quality evaluation
+            adaptive_threshold: Whether to use adaptive threshold adjustment
         """
         from tqdm import tqdm
+        import random
         
         pbar = tqdm(range(steps), desc="Optimizing merges")
+        no_candidate_count = 0
+        stats = {"step": [], "vocab_size": [], "min_dist": [], "max_dist": [], "mean_dist": [], "num_candidates": []}
+        
+        # Compute initial distance statistics
+        if adaptive_threshold:
+            distance_stats = self._compute_distance_statistics()
+            logger.info(f"Initial distance statistics: min={distance_stats['min']:.6f}, "
+                       f"max={distance_stats['max']:.6f}, mean={distance_stats['mean']:.6f}")
+            
+            # Verify that distances are non-zero
+            if distance_stats['max'] < 1e-6:
+                logger.warning("WARNING: Maximum distance is near zero! This will prevent finding merge candidates.")
+                logger.warning("Consider reinitializing embeddings with a larger initialization scale.")
+                
+                # Adjust threshold to a very small value to find any possible candidates
+                self.merge_threshold = 1e-5
+                logger.info(f"Auto-adjusting merge threshold to {self.merge_threshold:.6f}")
+            
+            # Adjust initial threshold based on distance distribution if needed
+            if distance_stats['max'] > 0 and self.merge_threshold > distance_stats['max']:
+                # Set threshold to be 150% of the mean distance to start with
+                self.merge_threshold = min(self.merge_threshold, distance_stats['mean'] * 1.5)
+                logger.info(f"Adjusted initial merge threshold to {self.merge_threshold:.6f}")
         
         for step in pbar:
             start_time = time.time()
@@ -449,9 +510,37 @@ class FastHyperbolicTokenizer(HyperbolicTokenizer):
             # Get merge candidates
             candidates = self._find_merge_candidates_fast()
             
+            # Collect stats periodically
+            if step % log_every == 0 or not candidates:
+                distance_stats = self._compute_distance_statistics()
+                stats["step"].append(step)
+                stats["vocab_size"].append(self.current_vocab_size)
+                stats["min_dist"].append(distance_stats["min"])
+                stats["max_dist"].append(distance_stats["max"])
+                stats["mean_dist"].append(distance_stats["mean"])
+                stats["num_candidates"].append(len(candidates))
+                
+                logger.info(f"\nStep {step}: vocab_size={self.current_vocab_size}")
+                logger.info(f"  Distance stats: min={distance_stats['min']:.6f}, "
+                          f"max={distance_stats['max']:.6f}, mean={distance_stats['mean']:.6f}")
+                logger.info(f"  Merge candidates: {len(candidates)}")
+                logger.info(f"  Merge threshold: {self.merge_threshold:.6f}")
+            
             if not candidates:
-                logger.info(f"No more merge candidates found after {step} steps")
-                break
+                no_candidate_count += 1
+                
+                if no_candidate_count > 5 and adaptive_threshold:
+                    # Increase threshold more aggressively if we can't find candidates
+                    self.merge_threshold *= 1.5
+                    logger.info(f"No candidates found. Increasing threshold to {self.merge_threshold:.6f}")
+                    no_candidate_count = 0
+                    continue
+                elif no_candidate_count > 10:
+                    logger.info(f"No more merge candidates found after {step} steps")
+                    break
+                continue
+            else:
+                no_candidate_count = 0
             
             # Take the best candidate
             best = candidates[0]
@@ -482,5 +571,6 @@ class FastHyperbolicTokenizer(HyperbolicTokenizer):
                 )
             
             # Adaptive threshold adjustment
-            if step > 0 and step % 1000 == 0:
-                self.merge_threshold *= 1.02  # Slower increase
+            if adaptive_threshold and step > 0 and step % 1000 == 0:
+                # Gradual increase to handle increasing distances as training progresses
+                self.merge_threshold *= 1.1
